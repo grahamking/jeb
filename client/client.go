@@ -4,7 +4,6 @@ import (
 	"log"
 	"net"
 	"strings"
-	"time"
 )
 
 var c net.Conn
@@ -19,5 +18,6 @@ func init() {
 
 func Trace(args ...string) {
 	c.Write([]byte(strings.Join(args, ":") + "\n"))
-	time.Sleep(3 * time.Second)
+	in := make([]byte, 1)
+	c.Read(in)
 }
