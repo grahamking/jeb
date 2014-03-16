@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -65,11 +66,18 @@ func prepare(filename string) {
 		instrument(fset, fdecl)
 	}
 
-	out, _ := os.Create("example/out.go")
+	out, _ := os.Create(outName(filename))
 	err = format.Node(out, fset, f)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// outName is the name of the instrumented file
+func outName(inName string) string {
+	dir := filepath.Dir(inName)
+	base := filepath.Base(inName)
+	return filepath.Join(dir, "JEB"+base)
 }
 
 func addImport(f *ast.File) {
