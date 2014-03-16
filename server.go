@@ -31,9 +31,7 @@ func runServer() {
 		log.Fatal(err)
 	}
 
-	log.Println("NewJeb")
 	j := NewJeb(c)
-	log.Println("j.run")
 	j.run()
 
 	l.Close()
@@ -52,6 +50,7 @@ type Jeb struct {
 	buf            []byte
 	files          map[string][]string
 	skipInFunction string
+	stack          *stack
 }
 
 func NewJeb(c net.Conn) *Jeb {
@@ -59,26 +58,27 @@ func NewJeb(c net.Conn) *Jeb {
 		c:     c,
 		buf:   make([]byte, 1024),
 		files: make(map[string][]string),
+		stack: newStack(),
 	}
 }
 
 func (j *Jeb) run() {
 	for {
-		log.Println("receive")
 		numRead := j.receive()
 		if numRead == 0 {
 			break
 		}
 
-		log.Println("parse")
 		filename, line, function := j.parse(numRead)
+		if filename == "" {
+			j.proceed()
+			continue
+		}
 
 		if j.skipInFunction == "" || j.skipInFunction == function {
-			log.Println("display: ", filename, line)
 			j.display(filename, line)
 
 			input, err := j.waitForInput()
-			log.Println("input: ", input)
 			if err != nil {
 				break
 			}
@@ -91,7 +91,6 @@ func (j *Jeb) run() {
 			}
 
 		}
-		log.Println("proceed")
 		j.proceed()
 	}
 	j.c.Close()
@@ -110,16 +109,35 @@ func (j *Jeb) receive() int {
 
 func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 	var err error
+
 	parts := strings.Split(string(j.buf[:numRead]), ":")
-	if len(parts) != 3 {
-		log.Fatalf("Expected 3 parts, got %v", parts)
+	log.Println(parts)
+	cmd := parts[0]
+	args := parts[1:]
+
+	switch cmd {
+	case "ENTER":
+		j.stack.push(args[0])
+		return
+	case "EXIT":
+		j.stack.pop(args[0])
+		return
+	case "LINE":
+		break
+	default:
+		log.Fatalf("Unknown command: %s\n", cmd)
 	}
-	filename = parts[0]
-	line, err = strconv.Atoi(parts[1])
+
+	//argParts := strings.Split(args, ":")
+	if len(args) != 3 {
+		log.Fatalf("Expected 3 parts, got %v", args)
+	}
+	filename = args[0]
+	line, err = strconv.Atoi(args[1])
 	if err != nil {
 		log.Fatal(err)
 	}
-	function = parts[2]
+	function = args[2]
 
 	return filename, line, function
 }
@@ -133,7 +151,6 @@ func (j *Jeb) waitForInput() (rune, error) {
 	ev := termbox.PollEvent()
 	for ev.Type != termbox.EventKey {
 		ev = termbox.PollEvent()
-		log.Println("Event is", ev)
 	}
 	if ev.Key == termbox.KeyCtrlC {
 		return 0, errors.New("Ctrl-C")
@@ -183,4 +200,25 @@ func tbprint(x, y int, fg, bg termbox.Attribute, msg string) {
 		termbox.SetCell(x, y, c, fg, bg)
 		x++
 	}
+}
+
+type stack struct {
+	s   []string
+	pos int
+}
+
+func newStack() *stack {
+	return &stack{
+		s:   make([]string, 0, 4),
+		pos: 0,
+	}
+}
+
+func (s *stack) push(str string) {
+	s.s[s.pos] = str
+	s.pos++
+}
+
+func (s *stack) pop(str string) {
+	s.pos--
 }

@@ -89,20 +89,70 @@ func instrument(fset *token.FileSet, fdecl *ast.FuncDecl) {
 	var finalList []ast.Stmt
 
 	for _, expr := range fdecl.Body.List {
+
+		log.Printf("%T, %v", expr, expr)
+
 		position := fset.Position(expr.Pos())
 		finalList = append(
 			finalList,
 			makeCall(
 				insertFuncPkg,
 				insertFuncName,
+				strconv.Quote("LINE"),
 				strconv.Quote(position.Filename),
 				strconv.Quote(fmt.Sprintf("%d", position.Line)),
 				strconv.Quote(funcname),
 			),
 		)
+
+		isCall, callName := isCallExpr(expr)
+		if isCall {
+			finalList = append(
+				finalList,
+				makeCall(
+					insertFuncPkg,
+					insertFuncName,
+					strconv.Quote("ENTER"),
+					strconv.Quote(callName),
+				),
+			)
+		}
+
 		finalList = append(finalList, expr)
+
+		if isCall {
+			finalList = append(
+				finalList,
+				makeCall(
+					insertFuncPkg,
+					insertFuncName,
+					strconv.Quote("EXIT"),
+					strconv.Quote(callName),
+				),
+			)
+		}
 	}
 	fdecl.Body.List = finalList
+}
+
+func isCallExpr(expr ast.Stmt) (bool, string) {
+	exprstmt, ok := expr.(*ast.ExprStmt)
+	if !ok {
+		return false, ""
+	}
+	callexpr, ok := exprstmt.X.(*ast.CallExpr)
+	if !ok {
+		return false, ""
+	}
+
+	var name string
+	switch v := callexpr.Fun.(type) {
+	case *ast.SelectorExpr:
+		name = v.Sel.Name
+	case *ast.Ident:
+		name = v.Name
+	}
+	return true, name
 }
 
 func makeCall(pkg, fname string, args ...string) *ast.ExprStmt {
