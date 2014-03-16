@@ -1,3 +1,6 @@
+// Usage:
+//  Instrument: ./jeb example/simple.go
+//  Server: ./jeb
 package main
 
 import (
@@ -18,9 +21,17 @@ const (
 )
 
 func main() {
+	if len(os.Args) == 2 {
+		prepare(os.Args[1])
+	} else {
+		runServer()
+	}
+}
+
+func prepare(filename string) {
 
 	fset := new(token.FileSet)
-	f, err := parser.ParseFile(fset, "example/simple.go", nil, 0)
+	f, err := parser.ParseFile(fset, filename, nil, 0)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func main() {
+func runServer() {
 	termbox.Init()
 	defer termbox.Close()
 
