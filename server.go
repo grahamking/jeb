@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"github.com/nsf/termbox-go"
 	"io"
 	"io/ioutil"
 	"log"
@@ -10,6 +9,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/nsf/termbox-go"
+)
+
+const (
+	STACK_LINE = 0
+	BODY_START = 2
 )
 
 func runServer() {
@@ -22,6 +28,7 @@ func runServer() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer l.Close()
 
 	out(0, 0, "Waiting for message from client...")
 	termbox.Flush()
@@ -30,11 +37,10 @@ func runServer() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer c.Close()
 
 	j := NewJeb(c)
 	j.run()
-
-	l.Close()
 }
 
 func setupLogging() {
@@ -46,19 +52,20 @@ func setupLogging() {
 }
 
 type Jeb struct {
-	c              net.Conn
-	buf            []byte
-	files          map[string][]string
-	skipInFunction string
-	stack          *stack
+	c         net.Conn
+	buf       []byte
+	files     map[string][]string
+	stack     *stack
+	contLevel int
 }
 
 func NewJeb(c net.Conn) *Jeb {
 	return &Jeb{
-		c:     c,
-		buf:   make([]byte, 1024),
-		files: make(map[string][]string),
-		stack: newStack(),
+		c:         c,
+		buf:       make([]byte, 1024),
+		files:     make(map[string][]string),
+		stack:     newStack(),
+		contLevel: -1,
 	}
 }
 
@@ -75,25 +82,28 @@ func (j *Jeb) run() {
 			continue
 		}
 
-		if j.skipInFunction == "" || j.skipInFunction == function {
+		j.stack.condPush(function)
+
+		if j.contLevel == -1 || j.contLevel < j.stack.Pos {
 			j.display(filename, line)
 
-			input, err := j.waitForInput()
+			_, err := j.waitForInput()
 			if err != nil {
 				break
 			}
-			if input == 's' {
-				// step in
-				j.skipInFunction = ""
-			} else if input == 'n' {
-				// next (step over)
-				j.skipInFunction = function
-			}
+			/*
+				if input == 's' {
+					// step in
+					j.contLevel = -1
+				} else if input == 'n' {
+					// next (step over)
+					j.contLevel = j.stack.Pos
+				}
+			*/
 
 		}
 		j.proceed()
 	}
-	j.c.Close()
 }
 
 func (j *Jeb) receive() int {
@@ -111,7 +121,6 @@ func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 	var err error
 
 	parts := strings.Split(string(j.buf[:numRead]), ":")
-	log.Println(parts)
 	cmd := parts[0]
 	args := parts[1:]
 
@@ -128,7 +137,6 @@ func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 		log.Fatalf("Unknown command: %s\n", cmd)
 	}
 
-	//argParts := strings.Split(args, ":")
 	if len(args) != 3 {
 		log.Fatalf("Expected 3 parts, got %v", args)
 	}
@@ -160,6 +168,7 @@ func (j *Jeb) waitForInput() (rune, error) {
 
 func (j *Jeb) display(filename string, lineNum int) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+	j.printStackLine()
 
 	lines, ok := j.files[filename]
 	if !ok {
@@ -168,10 +177,11 @@ func (j *Jeb) display(filename string, lineNum int) {
 	}
 
 	for i, line := range lines {
+		offset := i + BODY_START
 		if i+1 == lineNum {
-			tbprint(0, i, termbox.ColorDefault|termbox.AttrReverse, termbox.ColorDefault, line)
+			tbprint(0, offset, termbox.ColorDefault|termbox.AttrReverse, termbox.ColorDefault, line)
 		} else {
-			out(0, i, line)
+			out(0, offset, line)
 		}
 	}
 	termbox.Flush()
@@ -186,6 +196,17 @@ func (j *Jeb) load(filename string) {
 	lines := strings.Split(string(filedata), "\n")
 
 	j.files[filename] = lines
+}
+
+func (j *Jeb) printStackLine() {
+	st := j.stack.stack()
+	stackLine := make([]string, 0, len(st))
+	for _, function := range st {
+		stackLine = append(stackLine, function)
+	}
+	w, _ := termbox.Size()
+	out(0, STACK_LINE, strings.Join(stackLine, "> "))
+	out(0, STACK_LINE+1, strings.Repeat("-", w))
 }
 
 func bold(str string) string {
@@ -204,21 +225,32 @@ func tbprint(x, y int, fg, bg termbox.Attribute, msg string) {
 
 type stack struct {
 	s   []string
-	pos int
+	Pos int
 }
 
 func newStack() *stack {
 	return &stack{
-		s:   make([]string, 0, 4),
-		pos: 0,
+		s:   make([]string, 64),
+		Pos: 0,
 	}
 }
 
 func (s *stack) push(str string) {
-	s.s[s.pos] = str
-	s.pos++
+	s.s[s.Pos] = str
+	s.Pos++
 }
 
 func (s *stack) pop(str string) {
-	s.pos--
+	s.Pos--
+}
+
+func (s *stack) stack() []string {
+	return s.s[:s.Pos]
+}
+
+// condPush pushes 'str' on to the stack if it's not already the last element
+func (s *stack) condPush(str string) {
+	if s.Pos == 0 || s.s[s.Pos-1] != str {
+		s.push(str)
+	}
 }

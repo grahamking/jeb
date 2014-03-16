@@ -1,6 +1,7 @@
 // Usage:
 //  Instrument: ./jeb example/simple.go
 //  Server: ./jeb
+//  Other window: go run example/JEBsimple.go
 package main
 
 import (
