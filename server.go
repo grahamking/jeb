@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -19,36 +20,50 @@ const (
 )
 
 func runServer() {
-	termbox.Init()
-	defer termbox.Close()
-
-	setupLogging()
 
 	l, err := net.Listen("unix", "/tmp/jeb-socket")
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 	defer l.Close()
 
-	out(0, 0, "Waiting for message from client...")
-	termbox.Flush()
+	fmt.Println("Waiting for message from client...")
 
 	c, err := l.Accept()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 	defer c.Close()
 
-	j := NewJeb(c)
-	j.run()
+	j := NewJeb(c, keyLoop())
+	j.run() // doesn't return until exit
 }
 
 func setupLogging() {
+	log.Println("Logging to jeb.log")
 	l, err := os.Create("jeb.log")
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 	log.SetOutput(l)
+}
+
+// Runs a go-routine to fetch keyboard events
+func keyLoop() <-chan termbox.Event {
+	ch := make(chan termbox.Event)
+	go func() {
+		var ev termbox.Event
+		for {
+			ev = termbox.PollEvent()
+			if ev.Type == termbox.EventKey {
+				ch <- ev
+			}
+		}
+	}()
+	return ch
 }
 
 type Jeb struct {
@@ -57,19 +72,25 @@ type Jeb struct {
 	files     map[string][]string
 	stack     *stack
 	contLevel int
+	keyChan   <-chan termbox.Event
 }
 
-func NewJeb(c net.Conn) *Jeb {
+func NewJeb(c net.Conn, keyChan <-chan termbox.Event) *Jeb {
 	return &Jeb{
 		c:         c,
 		buf:       make([]byte, 1024),
 		files:     make(map[string][]string),
 		stack:     newStack(),
 		contLevel: -1,
+		keyChan:   keyChan,
 	}
 }
 
 func (j *Jeb) run() {
+	termbox.Init()
+	defer termbox.Close()
+	setupLogging()
+
 	for {
 		numRead := j.receive()
 		if numRead == 0 {
@@ -112,11 +133,13 @@ func (j *Jeb) receive() int {
 		return 0
 	}
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return -1
 	}
 	return numRead
 }
 
+// TODO: This should be able to return error as well
 func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 	var err error
 
@@ -134,16 +157,16 @@ func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 	case "LINE":
 		break
 	default:
-		log.Fatalf("Unknown command: %s\n", cmd)
+		log.Println("Unknown command: %s\n", cmd)
 	}
 
 	if len(args) != 3 {
-		log.Fatalf("Expected 3 parts, got %v", args)
+		log.Println("Expected 3 parts, got %v", args)
 	}
 	filename = args[0]
 	line, err = strconv.Atoi(args[1])
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	function = args[2]
 
@@ -156,10 +179,7 @@ func (j *Jeb) proceed() {
 }
 
 func (j *Jeb) waitForInput() (rune, error) {
-	ev := termbox.PollEvent()
-	for ev.Type != termbox.EventKey {
-		ev = termbox.PollEvent()
-	}
+	ev := <-j.keyChan
 	if ev.Key == termbox.KeyCtrlC {
 		return 0, errors.New("Ctrl-C")
 	}
@@ -191,7 +211,8 @@ func (j *Jeb) display(filename string, lineNum int) {
 func (j *Jeb) load(filename string) {
 	filedata, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 	lines := strings.Split(string(filedata), "\n")
 
