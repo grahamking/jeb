@@ -155,7 +155,6 @@ func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 		j.stack.pop(args[0])
 		return
 	case "LINE":
-		break
 	default:
 		log.Println("Unknown command: %s\n", cmd)
 	}
@@ -196,9 +195,22 @@ func (j *Jeb) display(filename string, lineNum int) {
 		lines, _ = j.files[filename]
 	}
 
-	for i, line := range lines {
+	_, h := termbox.Size()
+	middle := h / 2
+	lineStart := 0
+	highlight := lineNum
+	if lineNum > middle {
+		lineStart = lineNum - middle
+		highlight = middle
+	}
+	lineEnd := lineStart + h
+	if lineEnd > len(lines) {
+		lineEnd = len(lines)
+	}
+
+	for i, line := range lines[lineStart:lineEnd] {
 		offset := i + BODY_START
-		if i+1 == lineNum {
+		if i+1 == highlight {
 			tbprint(0, offset, termbox.ColorDefault|termbox.AttrReverse, termbox.ColorDefault, line)
 		} else {
 			out(0, offset, line)
