@@ -90,7 +90,7 @@ func prepare(fullPkgName string) {
 		}
 
 		log.Println("Instrumenting", fdecl.Name)
-		instrument(fset, fdecl)
+		instrumentFunction(fset, fdecl)
 	}
 
 	// Write out a single instrumented file per package, to temp dir
@@ -113,22 +113,21 @@ func outName(inName string) string {
 	out := outDir + "jeb.go"
 	log.Println("Writing to ", out)
 	return out
-	/*
-		dir := filepath.Dir(inName)
-		base := filepath.Base(inName)
-		return filepath.Join(dir, "JEB"+base)
-	*/
 }
 
 func addImport(f *ast.File) {
 
 }
 
-func instrument(fset *token.FileSet, fdecl *ast.FuncDecl) {
+func instrumentFunction(fset *token.FileSet, fdecl *ast.FuncDecl) {
 	funcname := fdecl.Name.String()
+	instrumentBlock(fset, fdecl.Body, funcname)
+}
+
+func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string) {
 	var finalList []ast.Stmt
 
-	for _, expr := range fdecl.Body.List {
+	for _, expr := range block.List {
 
 		log.Printf("%T, %v", expr, expr)
 
@@ -171,8 +170,20 @@ func instrument(fset *token.FileSet, fdecl *ast.FuncDecl) {
 				),
 			)
 		}
+
+		switch texpr := expr.(type) {
+		case *ast.IfStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.ForStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.SwitchStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.SelectStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		}
+
 	}
-	fdecl.Body.List = finalList
+	block.List = finalList
 }
 
 func isCallExpr(expr ast.Stmt) (bool, string) {
