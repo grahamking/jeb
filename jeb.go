@@ -7,12 +7,13 @@ package main
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"log"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 )
 
@@ -30,13 +31,38 @@ func main() {
 	}
 }
 
-func prepare(filename string) {
+func prepare(fullPkgName string) {
 
+	// Load all the files in the package, and merge them into a single ast.File
+
+	pkg, err := build.Import(fullPkgName, "", build.FindOnly)
+	log.Println("Found package", fullPkgName, "in", pkg.Dir)
+
+	//f, err := parser.ParseFile(fset, filename, nil, 0)
 	fset := new(token.FileSet)
-	f, err := parser.ParseFile(fset, filename, nil, 0)
+	pkgs, err := parser.ParseDir(fset, pkg.Dir, nil, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println(pkgs)
+
+	pkgName := path.Base(fullPkgName)
+	astPackage, ok := pkgs[pkgName]
+	if ok {
+		log.Printf("Instrumenting package '%s'\n", pkgName)
+	} else {
+		astPackage, ok = pkgs["main"]
+		if !ok {
+			log.Fatalf("Could not find package 'main' or '%s'. Cannot continue.", pkgName)
+		}
+		log.Println("Instrumenting package 'main'")
+	}
+	f := ast.MergePackageFiles(
+		astPackage,
+		ast.FilterFuncDuplicates&ast.FilterUnassociatedComments,
+	)
+
+	// Instrument this ast.File
 
 	newImport := &ast.ImportSpec{
 		Path: &ast.BasicLit{
@@ -67,7 +93,12 @@ func prepare(filename string) {
 		instrument(fset, fdecl)
 	}
 
-	out, _ := os.Create(outName(filename))
+	// Write out a single instrumented file per package, to temp dir
+
+	out, err := os.Create(outName(fullPkgName))
+	if err != nil {
+		log.Fatal(err)
+	}
 	err = format.Node(out, fset, f)
 	if err != nil {
 		log.Fatal(err)
@@ -76,9 +107,17 @@ func prepare(filename string) {
 
 // outName is the name of the instrumented file
 func outName(inName string) string {
-	dir := filepath.Dir(inName)
-	base := filepath.Base(inName)
-	return filepath.Join(dir, "JEB"+base)
+	rootDir := os.TempDir()
+	outDir := fmt.Sprintf("%s/src/%s/", rootDir, inName)
+	os.MkdirAll(outDir, os.ModePerm)
+	out := outDir + "jeb.go"
+	log.Println("Writing to ", out)
+	return out
+	/*
+		dir := filepath.Dir(inName)
+		base := filepath.Base(inName)
+		return filepath.Join(dir, "JEB"+base)
+	*/
 }
 
 func addImport(f *ast.File) {
