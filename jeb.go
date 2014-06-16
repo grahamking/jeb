@@ -38,7 +38,6 @@ func prepare(fullPkgName string) {
 	pkg, err := build.Import(fullPkgName, "", build.FindOnly)
 	log.Println("Found package", fullPkgName, "in", pkg.Dir)
 
-	//f, err := parser.ParseFile(fset, filename, nil, 0)
 	fset := new(token.FileSet)
 	pkgs, err := parser.ParseDir(fset, pkg.Dir, nil, 0)
 	if err != nil {
@@ -57,6 +56,7 @@ func prepare(fullPkgName string) {
 		}
 		log.Println("Instrumenting package 'main'")
 	}
+
 	f := ast.MergePackageFiles(
 		astPackage,
 		ast.FilterFuncDuplicates&ast.FilterUnassociatedComments,
@@ -126,6 +126,7 @@ func instrumentFunction(fset *token.FileSet, fdecl *ast.FuncDecl) {
 
 func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string) {
 	var finalList []ast.Stmt
+	local := make(map[string]bool)
 
 	for _, expr := range block.List {
 
@@ -143,6 +144,20 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 				strconv.Quote(funcname),
 			),
 		)
+		/*
+			for varName := range local {
+				finalList = append(
+					finalList,
+					makeCall(
+						insertFuncPkg,
+						insertFuncName,
+						strconv.Quote("VAR"),
+						strconv.Quote(varName),
+						varName,	// TODO: Emit AST for fmt.Sprintf("%s", varName)
+					),
+				)
+			}
+		*/
 
 		isCall, callName := isCallExpr(expr)
 		if isCall {
@@ -180,6 +195,13 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 			instrumentBlock(fset, texpr.Body, funcname)
 		case *ast.SelectStmt:
 			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.AssignStmt:
+			for _, expr := range texpr.Lhs {
+				if ident, ok := expr.(*ast.Ident); ok {
+					fmt.Printf("Found variable '%s'\n", ident.Name)
+					local[ident.Name] = true
+				}
+			}
 		}
 
 	}
