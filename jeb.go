@@ -1,7 +1,8 @@
 // Usage:
-//  Instrument: ./jeb example/simple.go
+//  Instrument: ./jeb <pkg>
 //  Server: ./jeb
-//  Other window: go run example/JEBsimple.go
+// Put /tmp first on your GOPATH, then run your app as normal
+// (or if a binary run from /tmp/src/<pkg>)
 package main
 
 import (
@@ -36,6 +37,9 @@ func prepare(fullPkgName string) {
 	// Load all the files in the package, and merge them into a single ast.File
 
 	pkg, err := build.Import(fullPkgName, "", build.FindOnly)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Println("Found package", fullPkgName, "in", pkg.Dir)
 
 	fset := new(token.FileSet)
@@ -101,7 +105,12 @@ func prepare(fullPkgName string) {
 	}
 	err = format.Node(out, fset, f)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		log.Println("ERROR. Writing AST to", out.Name())
+		err = ast.Fprint(out, fset, f, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
@@ -113,10 +122,6 @@ func outName(inName string) string {
 	out := outDir + "jeb.go"
 	log.Println("Writing to ", out)
 	return out
-}
-
-func addImport(f *ast.File) {
-
 }
 
 func instrumentFunction(fset *token.FileSet, fdecl *ast.FuncDecl) {
@@ -144,6 +149,7 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 				strconv.Quote(funcname),
 			),
 		)
+
 		/*
 			for varName := range local {
 				finalList = append(
@@ -198,7 +204,7 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 		case *ast.AssignStmt:
 			for _, expr := range texpr.Lhs {
 				if ident, ok := expr.(*ast.Ident); ok {
-					fmt.Printf("Found variable '%s'\n", ident.Name)
+					log.Printf("Found variable '%s'\n", ident.Name)
 					local[ident.Name] = true
 				}
 			}
