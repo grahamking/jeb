@@ -156,11 +156,11 @@ func (j *Jeb) parse(numRead int) (filename string, line int, function string) {
 		return
 	case "LINE":
 	default:
-		log.Println("Unknown command: %s\n", cmd)
+		log.Println("Unknown command:", cmd)
 	}
 
 	if len(args) != 3 {
-		log.Println("Expected 3 parts, got %v", args)
+		log.Println("Expected 3 parts, got", args)
 	}
 	filename = args[0]
 	line, err = strconv.Atoi(args[1])
