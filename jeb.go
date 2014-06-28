@@ -162,25 +162,33 @@ func instrumentFunction(fset *token.FileSet, fdecl *ast.FuncDecl) {
 }
 
 func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string) {
+	finalList := instrumentList(fset, block.List, funcname)
+	block.List = finalList
+}
+
+func instrumentList(fset *token.FileSet, list []ast.Stmt, funcname string) []ast.Stmt {
 	var finalList []ast.Stmt
 	local := make(map[string]bool)
 
-	for _, expr := range block.List {
+	for _, expr := range list {
 
 		log.Printf("%T, %v", expr, expr)
 
-		position := fset.Position(expr.Pos())
-		finalList = append(
-			finalList,
-			makeCall(
-				insertFuncPkg,
-				insertFuncName,
-				strconv.Quote("LINE"),
-				strconv.Quote(position.Filename),
-				strconv.Quote(fmt.Sprintf("%d", position.Line)),
-				strconv.Quote(funcname),
-			),
-		)
+		if _, ok := expr.(*ast.CaseClause); !ok { // Don't instrument between switch and clause
+			// Add the client.Trace statement
+			position := fset.Position(expr.Pos())
+			finalList = append(
+				finalList,
+				makeCall(
+					insertFuncPkg,
+					insertFuncName,
+					strconv.Quote("LINE"),
+					strconv.Quote(position.Filename),
+					strconv.Quote(fmt.Sprintf("%d", position.Line)),
+					strconv.Quote(funcname),
+				),
+			)
+		}
 
 		/*
 			for varName := range local {
@@ -231,6 +239,9 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 			instrumentBlock(fset, texpr.Body, funcname)
 		case *ast.SwitchStmt:
 			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.CaseClause:
+			finalList := instrumentList(fset, texpr.Body, funcname)
+			texpr.Body = finalList
 		case *ast.SelectStmt:
 			instrumentBlock(fset, texpr.Body, funcname)
 		case *ast.AssignStmt:
@@ -243,7 +254,7 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 		}
 
 	}
-	block.List = finalList
+	return finalList
 }
 
 func isCallExpr(expr ast.Stmt) (bool, string) {
