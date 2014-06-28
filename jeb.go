@@ -97,28 +97,30 @@ func group(fullPkgName string) (*token.FileSet, *ast.File) {
 	return fset, f
 }
 
-// Instrument this ast.File
-func instrument(fset *token.FileSet, f *ast.File) {
+func importSpec() *ast.ImportSpec {
 	newImport := &ast.ImportSpec{
 		Path: &ast.BasicLit{
 			Kind:  token.STRING,
 			Value: strconv.Quote(insertPkg),
 		},
 	}
-	f.Imports = append(f.Imports, newImport)
-	var isImportAdded bool
+	return newImport
+}
 
-	// Instrument all the functions, and add the import
+// Instrument this ast.File
+func instrument(fset *token.FileSet, f *ast.File) {
+
+	// Add the jeb/client import
+	importSpec := importSpec()
+	decl := ast.GenDecl{
+		Tok:   token.IMPORT,
+		Specs: []ast.Spec{importSpec},
+	}
+	f.Imports = append(f.Imports, importSpec)
+	f.Decls = append([]ast.Decl{&decl}, f.Decls...)
+
+	// Instrument all the functions
 	for _, decl := range f.Decls {
-
-		if !isImportAdded {
-			gen, ok := decl.(*ast.GenDecl)
-			if ok && gen.Tok == token.IMPORT {
-				gen.Specs = append(gen.Specs, newImport)
-				isImportAdded = true
-			}
-		}
-
 		fdecl, ok := decl.(*ast.FuncDecl)
 		if !ok {
 			continue
