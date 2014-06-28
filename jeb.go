@@ -168,6 +168,29 @@ func instrumentBlock(fset *token.FileSet, block *ast.BlockStmt, funcname string)
 	block.List = finalList
 }
 
+// Can we put a statement right before this?
+// False for 'switch/case' and 'select/comm'
+func canStmt(expr ast.Stmt) bool {
+	_, isInSwitch := expr.(*ast.CaseClause)
+	_, isInSelect := expr.(*ast.CommClause)
+	return !(isInSwitch || isInSelect)
+}
+
+// Add the client.Trace statement
+func addTrace(l []ast.Stmt, position token.Position, funcname string) []ast.Stmt {
+	return append(
+		l,
+		makeCall(
+			insertFuncPkg,
+			insertFuncName,
+			strconv.Quote("LINE"),
+			strconv.Quote(position.Filename),
+			strconv.Quote(fmt.Sprintf("%d", position.Line)),
+			strconv.Quote(funcname),
+		),
+	)
+}
+
 func instrumentList(fset *token.FileSet, list []ast.Stmt, funcname string) []ast.Stmt {
 	var finalList []ast.Stmt
 	local := make(map[string]bool)
@@ -175,21 +198,9 @@ func instrumentList(fset *token.FileSet, list []ast.Stmt, funcname string) []ast
 	for _, expr := range list {
 
 		log.Printf("%T, %v", expr, expr)
-
-		if _, ok := expr.(*ast.CaseClause); !ok { // Don't instrument between switch and clause
-			// Add the client.Trace statement
+		if canStmt(expr) {
 			position := fset.Position(expr.Pos())
-			finalList = append(
-				finalList,
-				makeCall(
-					insertFuncPkg,
-					insertFuncName,
-					strconv.Quote("LINE"),
-					strconv.Quote(position.Filename),
-					strconv.Quote(fmt.Sprintf("%d", position.Line)),
-					strconv.Quote(funcname),
-				),
-			)
+			finalList = addTrace(finalList, position, funcname)
 		}
 
 		/*
