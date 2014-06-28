@@ -1,5 +1,5 @@
 // Usage:
-//  Instrument: ./jeb <pkg>
+//  Instrument: ./jeb <pkg|file.go>
 //  Server: ./jeb
 // Put /tmp first on your GOPATH, then run your app as normal
 // (or if a binary run from /tmp/src/<pkg>)
@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -32,10 +33,37 @@ func main() {
 	}
 }
 
-func prepare(fullPkgName string) {
+func prepare(target string) {
+	var fset *token.FileSet
+	var f *ast.File
+	if strings.HasSuffix(target, ".go") {
+		fset, f = single(target)
+	} else {
+		fset, f = group(target)
+	}
+	instrument(fset, f)
+	write(target, fset, f)
+}
 
-	// Load all the files in the package, and merge them into a single ast.File
+func single(filename string) (*token.FileSet, *ast.File) {
+	sanity, err := os.Open(filename)
+	if err != nil {
+		log.Println(err)
+		log.Fatal("Could not open ", filename, ". Is that path right?")
+	}
+	sanity.Close()
 
+	fset := new(token.FileSet)
+	f, err := parser.ParseFile(fset, filename, nil, 0)
+	if err != nil {
+		log.Fatal("Error in ParseFile: ", err)
+	}
+	return fset, f
+}
+
+// group loads all the files in the package, and merges them into
+// a single ast.File
+func group(fullPkgName string) (*token.FileSet, *ast.File) {
 	pkg, err := build.Import(fullPkgName, "", build.FindOnly)
 	if err != nil {
 		log.Fatal(err)
@@ -66,8 +94,11 @@ func prepare(fullPkgName string) {
 		ast.FilterFuncDuplicates&ast.FilterUnassociatedComments,
 	)
 
-	// Instrument this ast.File
+	return fset, f
+}
 
+// Instrument this ast.File
+func instrument(fset *token.FileSet, f *ast.File) {
 	newImport := &ast.ImportSpec{
 		Path: &ast.BasicLit{
 			Kind:  token.STRING,
@@ -96,9 +127,10 @@ func prepare(fullPkgName string) {
 		log.Println("Instrumenting", fdecl.Name)
 		instrumentFunction(fset, fdecl)
 	}
+}
 
-	// Write out a single instrumented file per package, to temp dir
-
+// Write out a single instrumented file per package, to temp dir
+func write(fullPkgName string, fset *token.FileSet, f *ast.File) {
 	out, err := os.Create(outName(fullPkgName))
 	if err != nil {
 		log.Fatal(err)
