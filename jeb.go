@@ -34,15 +34,18 @@ func main() {
 }
 
 func prepare(target string) {
-	var fset *token.FileSet
-	var f *ast.File
+	var filenames []string
 	if strings.HasSuffix(target, ".go") {
-		fset, f = single(target)
+		filenames = append(filenames, target)
 	} else {
-		fset, f = group(target)
+		filenames = listFiles(target)
 	}
-	instrument(fset, f)
-	write(target, fset, f)
+	log.Println("Filenames:", filenames)
+	for _, filename := range filenames {
+		fset, f := single(filename)
+		instrument(fset, f)
+		write(target+"/"+path.Base(filename), fset, f)
+	}
 }
 
 func single(filename string) (*token.FileSet, *ast.File) {
@@ -61,40 +64,26 @@ func single(filename string) (*token.FileSet, *ast.File) {
 	return fset, f
 }
 
-// group loads all the files in the package, and merges them into
-// a single ast.File
-func group(fullPkgName string) (*token.FileSet, *ast.File) {
-	pkg, err := build.Import(fullPkgName, "", build.FindOnly)
+func listFiles(pkgName string) []string {
+	pkg, err := build.Import(pkgName, "", build.FindOnly)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Found package", fullPkgName, "in", pkg.Dir)
+	log.Println("Found package", pkgName, "in", pkg.Dir)
 
-	fset := new(token.FileSet)
-	pkgs, err := parser.ParseDir(fset, pkg.Dir, nil, 0)
+	var files []string
+	d, err := os.Open(pkg.Dir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println(pkgs)
-
-	pkgName := path.Base(fullPkgName)
-	astPackage, ok := pkgs[pkgName]
-	if ok {
-		log.Printf("Instrumenting package '%s'\n", pkgName)
-	} else {
-		astPackage, ok = pkgs["main"]
-		if !ok {
-			log.Fatalf("Could not find package 'main' or '%s'. Cannot continue.", pkgName)
-		}
-		log.Println("Instrumenting package 'main'")
+	infos, err := d.Readdir(0)
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	f := ast.MergePackageFiles(
-		astPackage,
-		ast.FilterFuncDuplicates&ast.FilterUnassociatedComments,
-	)
-
-	return fset, f
+	for _, info := range infos {
+		files = append(files, pkg.Dir+"/"+info.Name())
+	}
+	return files
 }
 
 func importSpec() *ast.ImportSpec {
@@ -132,8 +121,8 @@ func instrument(fset *token.FileSet, f *ast.File) {
 }
 
 // Write out a single instrumented file per package, to temp dir
-func write(fullPkgName string, fset *token.FileSet, f *ast.File) {
-	out, err := os.Create(outName(fullPkgName))
+func write(filename string, fset *token.FileSet, f *ast.File) {
+	out, err := os.Create(outName(filename))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -151,9 +140,9 @@ func write(fullPkgName string, fset *token.FileSet, f *ast.File) {
 // outName is the name of the instrumented file
 func outName(inName string) string {
 	rootDir := os.TempDir()
-	outDir := fmt.Sprintf("%s/src/%s/", rootDir, inName)
+	outDir := fmt.Sprintf("%s/src/%s/", rootDir, path.Dir(inName))
 	os.MkdirAll(outDir, os.ModePerm)
-	out := outDir + "jeb.go"
+	out := outDir + path.Base(inName)
 	log.Println("Writing to ", out)
 	return out
 }
@@ -309,26 +298,3 @@ func makeCall(pkg, fname string, args ...string) *ast.ExprStmt {
 
 	return &ast.ExprStmt{X: call}
 }
-
-/*
-
- 0: *ast.ExprStmt {
- .  X: *ast.CallExpr {
- .  .  Fun: *ast.SelectorExpr {
-			X: *ast.Ident{Name: "fmt"}
-			Sel: *ast.Ident{Name: "Println"}
- .  .  }
- .  .  Lparen: 4:9
- .  .  Args: []ast.Expr (len = 1) {
- .  .  .  0: *ast.BasicLit {
- .  .  .  .  ValuePos: 4:10
- .  .  .  .  Kind: STRING
- .  .  .  .  Value: "\"Hello, World!\""
- .  .  .  }
- .  .  }
- .  .  Ellipsis: -
- .  .  Rparen: 4:25
- .  }
- }
-
-*/
