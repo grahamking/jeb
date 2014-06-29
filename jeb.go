@@ -37,6 +37,7 @@ func prepare(target string) {
 	var filenames []string
 	if strings.HasSuffix(target, ".go") {
 		filenames = append(filenames, target)
+		target = path.Dir(target)
 	} else {
 		filenames = listFiles(target)
 	}
@@ -235,17 +236,9 @@ func instrumentList(fset *token.FileSet, list []ast.Stmt, funcname string) []ast
 		}
 
 		switch texpr := expr.(type) {
-		case *ast.IfStmt:
-			instrumentBlock(fset, texpr.Body, funcname)
-		case *ast.ForStmt:
-			instrumentBlock(fset, texpr.Body, funcname)
-		case *ast.SwitchStmt:
-			instrumentBlock(fset, texpr.Body, funcname)
 		case *ast.CaseClause:
 			finalList := instrumentList(fset, texpr.Body, funcname)
 			texpr.Body = finalList
-		case *ast.SelectStmt:
-			instrumentBlock(fset, texpr.Body, funcname)
 		case *ast.AssignStmt:
 			for _, expr := range texpr.Lhs {
 				if ident, ok := expr.(*ast.Ident); ok {
@@ -253,8 +246,17 @@ func instrumentList(fset *token.FileSet, list []ast.Stmt, funcname string) []ast
 					local[ident.Name] = true
 				}
 			}
+		case *ast.IfStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.ForStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.SwitchStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.SelectStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
+		case *ast.RangeStmt:
+			instrumentBlock(fset, texpr.Body, funcname)
 		}
-
 	}
 	return finalList
 }
